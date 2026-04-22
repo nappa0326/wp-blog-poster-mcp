@@ -1,0 +1,47 @@
+{
+  "name": "wp-blog-poster-mcp",
+  "version": "0.2.0",
+  "description": "Minimal local MCP server for creating and managing WordPress drafts over REST API (STDIO, Basic auth).",
+  "license": "MIT",
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "wordpress",
+    "wordpress-rest-api",
+    "claude",
+    "claude-desktop",
+    "claude-code",
+    "blog",
+    "cms",
+    "stdio"
+  ],
+  "type": "module",
+  "bin": {
+    "wp-blog-poster-mcp": "./build/index.js"
+  },
+  "files": [
+    "build/",
+    "README.md",
+    "README.ja.md",
+    "LICENSE",
+    "CHANGELOG.md",
+    "SECURITY.md",
+    ".env.example"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "start": "node build/index.js",
+    "inspector": "npx @modelcontextprotocol/inspector node build/index.js"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "1.29.0",
+    "zod": "3.25.76"
+  },
+  "devDependencies": {
+    "@types/node": "22.19.17",
+    "typescript": "5.9.3"
+  }
+}

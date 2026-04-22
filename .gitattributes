@@ -1,0 +1,13 @@
+# Windows 開発環境で作ったリポジトリを macOS / Linux ユーザーが clone した際に
+# shebang (#!/usr/bin/env node) が CRLF で壊れるのを防ぐため、全テキストを LF 固定。
+* text=auto eol=lf
+
+# 明示的にテキストとして扱うもの
+*.md   text eol=lf
+*.ts   text eol=lf
+*.js   text eol=lf
+*.mjs  text eol=lf
+*.cjs  text eol=lf
+*.json text eol=lf
+*.yml  text eol=lf
+*.yaml text eol=lf
