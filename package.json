@@ -3,6 +3,18 @@
   "version": "0.2.0",
   "description": "Minimal local MCP server for creating and managing WordPress drafts over REST API (STDIO, Basic auth).",
   "license": "MIT",
+  "author": {
+    "name": "nappa0326",
+    "url": "https://github.com/nappa0326"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/nappa0326/wp-blog-poster-mcp.git"
+  },
+  "bugs": {
+    "url": "https://github.com/nappa0326/wp-blog-poster-mcp/issues"
+  },
+  "homepage": "https://github.com/nappa0326/wp-blog-poster-mcp#readme",
   "keywords": [
     "mcp",
     "model-context-protocol",
