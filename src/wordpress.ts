@@ -3,6 +3,25 @@
 
 import type { AppConfig } from "./config.js";
 
+/**
+ * WordPress REST API が返す HTTP エラーを表す例外。
+ *
+ * 既存 message（`WordPress REST API エラー: ...` 形式）は `super(message)` で維持し、
+ * 呼出側が `err.message` 依存で実装しているケースとの互換性を保つ。
+ * term_exists エラーなど、エラーレスポンス body の構造を参照したい場合は `body` を利用する。
+ */
+export class WordPressApiError extends Error {
+  readonly status: number;
+  readonly body: unknown; // JSON パース済みレスポンス。パース不能なら { _raw: text }
+
+  constructor(message: string, status: number, body: unknown) {
+    super(message);
+    this.name = "WordPressApiError";
+    this.status = status;
+    this.body = body;
+  }
+}
+
 export interface CreateDraftPostParams {
   title: string;
   content: string;
@@ -629,19 +648,24 @@ export class WordPressClient {
         }
       }
     }
-    // 無ければ新規作成
-    const created = await this.request<Record<string, unknown>>(
-      "POST",
-      "/wp/v2/tags",
-      { name },
-    );
-    const id = Number(created.id);
-    if (!Number.isFinite(id) || id <= 0) {
-      throw new Error(
-        `タグ作成 API が ID を返しませんでした: ${JSON.stringify(created)}`,
+    // 無ければ新規作成。search でスリ抜けたが既存の場合は term_exists エラー (HTTP 400) になるため
+    // data.term_id を拾って既存 ID を返すフォールバックを試みる。
+    try {
+      const created = await this.request<Record<string, unknown>>(
+        "POST",
+        "/wp/v2/tags",
+        { name },
       );
+      const id = Number(created.id);
+      if (!Number.isFinite(id) || id <= 0) {
+        throw new Error(
+          `タグ作成 API が ID を返しませんでした: ${JSON.stringify(created)}`,
+        );
+      }
+      return id;
+    } catch (err) {
+      return await this.recoverTermExists(err, name, "tags");
     }
-    return id;
   }
 
   /**
@@ -680,19 +704,60 @@ export class WordPressClient {
         }
       }
     }
-    // 無ければ新規作成 (root 配下、parent 未指定)
-    const created = await this.request<Record<string, unknown>>(
-      "POST",
-      "/wp/v2/categories",
-      { name },
-    );
-    const id = Number(created.id);
-    if (!Number.isFinite(id) || id <= 0) {
-      throw new Error(
-        `カテゴリ作成 API が ID を返しませんでした: ${JSON.stringify(created)}`,
+    // 無ければ新規作成 (root 配下、parent 未指定)。
+    // search でスリ抜けた場合は term_exists エラーになるため data.term_id で再取得する。
+    try {
+      const created = await this.request<Record<string, unknown>>(
+        "POST",
+        "/wp/v2/categories",
+        { name },
       );
+      const id = Number(created.id);
+      if (!Number.isFinite(id) || id <= 0) {
+        throw new Error(
+          `カテゴリ作成 API が ID を返しませんでした: ${JSON.stringify(created)}`,
+        );
+      }
+      return id;
+    } catch (err) {
+      return await this.recoverTermExists(err, name, "categories");
     }
-    return id;
+  }
+
+  /**
+   * POST /wp/v2/{taxonomy} が term_exists エラー (HTTP 400) を返したときの回復処理。
+   *
+   * body.data.term_id で既存 term の ID を取得できたら、GET /wp/v2/{taxonomy}/{id} で
+   * name を検証してから返す。slug 衝突だが name 不一致のケースでの誤アタッチを防ぐ。
+   * 検証で不一致、または term_exists 以外のエラーだった場合は元のエラーを再 throw する。
+   */
+  private async recoverTermExists(
+    err: unknown,
+    expectedName: string,
+    taxonomy: "tags" | "categories",
+  ): Promise<number> {
+    if (err instanceof WordPressApiError && err.status === 400) {
+      const body = err.body as
+        | { code?: unknown; data?: { term_id?: unknown } }
+        | null;
+      if (body && body.code === "term_exists") {
+        const existingId = Number(body.data?.term_id);
+        if (Number.isFinite(existingId) && existingId > 0) {
+          // name 完全一致の検証。slug 衝突で別 name の既存 term を誤って返さないため。
+          const verify = await this.request<Record<string, unknown>>(
+            "GET",
+            `/wp/v2/${taxonomy}/${existingId}`,
+          );
+          if (
+            typeof verify.name === "string" &&
+            verify.name === expectedName
+          ) {
+            return existingId;
+          }
+        }
+      }
+    }
+    throw err;
   }
 
   /**
@@ -864,8 +929,16 @@ export class WordPressClient {
       });
       const text = await res.text();
       if (!res.ok) {
-        throw new Error(
+        let parsedBody: unknown;
+        try {
+          parsedBody = text ? JSON.parse(text) : null;
+        } catch {
+          parsedBody = { _raw: text };
+        }
+        throw new WordPressApiError(
           `WordPress REST API エラー: ${method} ${route} -> HTTP ${res.status} ${res.statusText}\n${truncate(text, 800)}`,
+          res.status,
+          parsedBody,
         );
       }
       if (!text) {
@@ -919,8 +992,18 @@ export class WordPressClient {
       });
       const text = await res.text();
       if (!res.ok) {
-        throw new Error(
+        // エラー body を JSON パース（パース不能時は raw 保持）。
+        // term_exists など呼出側でレスポンス構造を判定したい場合のために body を添えて throw する。
+        let parsedBody: unknown;
+        try {
+          parsedBody = text ? JSON.parse(text) : null;
+        } catch {
+          parsedBody = { _raw: text };
+        }
+        throw new WordPressApiError(
           `WordPress REST API エラー: ${method} ${route} -> HTTP ${res.status} ${res.statusText}\n${truncate(text, 800)}`,
+          res.status,
+          parsedBody,
         );
       }
       if (!text) {

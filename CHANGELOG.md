@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.1] - 2026-04-23
+
+### Fixed
+- Tag and category resolution (`create_draft_post` / `update_post` with `tags` /
+  `category_names`) no longer crashes when the WordPress `?search=` endpoint
+  fails to surface an existing term and the subsequent `POST` returns
+  `term_exists` (HTTP 400). The new fallback reads `data.term_id` from the
+  error body, verifies the existing term's `name` matches exactly (to avoid
+  accidentally attaching to a slug-colliding but differently-named term), and
+  returns the existing ID. The previous behavior was to propagate the raw 400
+  as a request failure.
+
+### Changed
+- Introduced an internal `WordPressApiError` exception type that carries the
+  response `status` and parsed `body`, allowing callers to react to specific
+  REST error codes. The public message format is unchanged, so downstream code
+  that relies on `err.message` continues to work.
+
 ## [0.3.0] - 2026-04-23
 
 ### Added
