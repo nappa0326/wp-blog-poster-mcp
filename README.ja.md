@@ -7,7 +7,7 @@ WordPress の REST API を叩いて下書き記事を作成・編集し、画像
 ## 提供ツール
 
 - `create_draft_post`: 下書き記事 1 件を作成する。常に `status: "draft"` 固定。アイキャッチ画像のメディア ID (`featured_media_id`) を指定可能。タグはタグ名、カテゴリは ID（`categories`）またはカテゴリ名（`category_names`）で指定でき、名前指定側は存在しなければ自動作成される（カテゴリは root 配下固定）。
-- `upload_media`: 画像（PNG/JPEG/GIF/WebP）をメディアライブラリにアップロードする。base64 で受け取り、`alt_text` / `caption` / `title` を設定できる。返り値に `<img>` 埋込のテンプレート文字列を含む。
+- `upload_media`: 画像（PNG/JPEG/GIF/WebP）をメディアライブラリにアップロードする。`file_path`（絶対パス、推奨）または `file_base64`（インライン）のいずれか一方を指定する。`file_path` 経路では MCP サーバーが直接ファイルを読むため、大容量画像を base64 で JSON-RPC に載せる必要がない。`alt_text` / `caption` / `title` を設定でき、返り値に `<img>` 埋込のテンプレート文字列を含む。
 - `update_post`: 既存の **下書き** 投稿を部分更新する。対象が `draft` 以外（`publish` など）の場合はエラーで弾き、誤って公開済み記事を書き換えることを防ぐ。`title` / `content` / `excerpt` / `categories` / `category_names` / `tags` / `featured_media_id` のうち指定したフィールドのみ上書きされ、未指定は現在値を保持する。
 - `list_drafts`: 現在の認証ユーザーが所有する **下書き** 投稿の一覧を、更新日時の降順で返す（既定 20 件）。`update_post` / `delete_draft_post` で対象の投稿 ID を特定する用途を想定。
 - `delete_draft_post`: 下書き投稿を削除する。既定（`force_delete=false`）では **ゴミ箱送り**（`status=trash`）で管理画面から復元可能。`force_delete=true` で完全削除（復元不可）。対象が `draft` 以外の場合はエラーで弾く。
@@ -111,8 +111,11 @@ Claude Code の MCP サーバー一覧は起動時に読まれるため、編集
 
 Claude に以下のように自然文で指示するとツールが連鎖的に呼ばれる:
 
-1. 画像を用意（スクショ、生成画像、ローカルファイル等）して base64 化する
-2. `upload_media` を呼び、`file_base64` / `filename` / `alt_text` を渡して `media_id` と `source_url` を得る
+1. 画像を用意する（スクショ、生成画像、ローカルファイル等）
+2. `upload_media` を次のいずれかの経路で呼ぶ:
+   - **`file_path`（推奨）**: 画像の絶対パスを渡す。MCP サーバーが直接ファイルを読むので、base64 化は不要で、大きな画像でもトークン消費ゼロ
+   - **`file_base64`**: インラインに base64 文字列を渡す。小さな画像向け、呼出側とサーバーがファイルシステムを共有しない場合用
+   どちらか一方と、常に必須の `filename`、任意で `alt_text` / `caption` / `title` を渡すと `media_id` と `source_url` が返る
 3. `create_draft_post` を呼ぶ際、本文に `<img src="{source_url}" alt="..." class="wp-image-{media_id}" />` を含め、必要に応じて `featured_media_id: {media_id}` をアイキャッチとして指定する
 
 PNG/JPEG/GIF/WebP 以外（SVG 等）は WP のデフォルト設定で拒否されるためサポート外。

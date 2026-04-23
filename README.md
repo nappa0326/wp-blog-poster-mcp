@@ -15,7 +15,7 @@ Nine tools are registered on the `wp-blog-poster` MCP server:
 | Tool | Purpose |
 |------|---------|
 | `create_draft_post` | Create a single draft. `status` is always pinned to `draft`; publishing is intentionally left to a human in the admin UI. Accepts tags by name (auto-created) and categories by ID and/or name (auto-created at the root level). |
-| `upload_media` | Upload a PNG / JPEG / GIF / WebP image (base64) to the media library. Returns a `media_id` and `source_url`, with optional `alt_text` / `caption` / `title`. |
+| `upload_media` | Upload a PNG / JPEG / GIF / WebP image to the media library. Accepts either `file_path` (absolute path, recommended — the server reads the file directly, avoiding base64 transport) or `file_base64` (inline, small images). Returns a `media_id` and `source_url`, with optional `alt_text` / `caption` / `title`. |
 | `update_post` | Partially update an existing **draft** post. Any non-draft target (`publish` / `pending` / `private` / `trash`) is rejected to prevent accidental edits to published content. Unspecified fields are preserved. Supports `category_names` like `create_draft_post`. |
 | `list_drafts` | List drafts owned by the authenticated user, ordered by last modified time, with `limit` and `offset` paging. |
 | `delete_draft_post` | Move a draft to the trash (default) or fully delete it with `force_delete: true`. Non-draft targets are rejected. |
@@ -135,10 +135,18 @@ Restart Claude Code after editing — the MCP server list is read at startup.
 
 ## Example: image + draft workflow
 
-1. Encode your image (screenshot, AI-generated, or on disk) as base64.
-2. Call `upload_media` with `file_base64` / `filename` / optional `alt_text`.
-   You get back `media_id` and `source_url`.
-3. Call `create_draft_post` with the body including
+1. Call `upload_media` with either:
+   - `file_path`: absolute path to the image on the MCP server's filesystem
+     (**recommended** for any non-trivial image — the server reads the file
+     directly, so the caller doesn't pay the JSON-RPC transport cost of a
+     base64-encoded payload). Exactly one of `file_path` or `file_base64`
+     must be provided.
+   - `file_base64`: inline base64 payload, for small images or callers that
+     don't share a filesystem with the server.
+
+   Plus `filename` (always required) and optional `alt_text` / `caption` /
+   `title`. You get back `media_id` and `source_url`.
+2. Call `create_draft_post` with the body including
    `<img src="{source_url}" alt="..." class="wp-image-{media_id}" />`, and
    optionally `featured_media_id: {media_id}` to set it as the featured
    image.

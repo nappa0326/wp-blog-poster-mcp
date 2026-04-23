@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] - 2026-04-23
+
+### Added
+- `upload_media` now accepts `file_path` (absolute local filesystem path) as
+  an alternative to `file_base64`. When provided, the MCP server reads the
+  file directly from disk instead of requiring the caller to transport a
+  base64-encoded string through the JSON-RPC channel. This eliminates the
+  token-overflow class of failures that occurred when MCP callers attempted
+  to upload images larger than a few hundred KB: a 5 MB PNG now costs only
+  the length of its path string on the caller side. Exactly one of
+  `file_path` or `file_base64` must be provided; specifying both or neither
+  returns a validation error. Non-absolute paths are rejected to avoid
+  ambiguity based on the MCP server's working directory.
+
+### Changed
+- `file_base64` is now optional (still validated when present). Existing
+  callers that pass `file_base64` continue to work unchanged.
+
 ## [0.3.1] - 2026-04-23
 
 ### Fixed
