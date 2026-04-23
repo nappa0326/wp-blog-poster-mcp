@@ -5,7 +5,13 @@ export interface AppConfig {
   apiUrl: string; // 末尾スラッシュなしに正規化されたベース URL
   username: string;
   appPassword: string;
+  requestTimeoutMs: number; // REST API 呼出のタイムアウト (ms)
 }
+
+// タイムアウトの既定値と許容範囲
+const DEFAULT_REQUEST_TIMEOUT_MS = 60_000;
+const MIN_REQUEST_TIMEOUT_MS = 1_000;
+const MAX_REQUEST_TIMEOUT_MS = 600_000;
 
 /**
  * 環境変数から設定を読み込み、検証する。
@@ -38,5 +44,24 @@ export function loadConfig(): AppConfig {
   // 末尾スラッシュを除去（クエリ組み立て時の `//` 回避）
   const apiUrl = rawUrl.replace(/\/+$/, "");
 
-  return { apiUrl, username, appPassword };
+  // タイムアウト設定（任意、未設定時は既定 60 秒）
+  const rawTimeout = process.env.WP_REQUEST_TIMEOUT_MS;
+  let requestTimeoutMs = DEFAULT_REQUEST_TIMEOUT_MS;
+  if (rawTimeout !== undefined && rawTimeout !== "") {
+    const parsed = Number(rawTimeout);
+    if (
+      !Number.isFinite(parsed) ||
+      !Number.isInteger(parsed) ||
+      parsed < MIN_REQUEST_TIMEOUT_MS ||
+      parsed > MAX_REQUEST_TIMEOUT_MS
+    ) {
+      console.error(
+        `[wp-blog-poster] WP_REQUEST_TIMEOUT_MS は ${MIN_REQUEST_TIMEOUT_MS}〜${MAX_REQUEST_TIMEOUT_MS} の整数 (ms) を指定してください: ${rawTimeout}`,
+      );
+      process.exit(1);
+    }
+    requestTimeoutMs = parsed;
+  }
+
+  return { apiUrl, username, appPassword, requestTimeoutMs };
 }

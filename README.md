@@ -10,17 +10,19 @@ overkill or unavailable.
 
 ## Features
 
-Seven tools are registered on the `wp-blog-poster` MCP server:
+Nine tools are registered on the `wp-blog-poster` MCP server:
 
 | Tool | Purpose |
 |------|---------|
-| `create_draft_post` | Create a single draft. `status` is always pinned to `draft`; publishing is intentionally left to a human in the admin UI. |
+| `create_draft_post` | Create a single draft. `status` is always pinned to `draft`; publishing is intentionally left to a human in the admin UI. Accepts tags by name (auto-created) and categories by ID and/or name (auto-created at the root level). |
 | `upload_media` | Upload a PNG / JPEG / GIF / WebP image (base64) to the media library. Returns a `media_id` and `source_url`, with optional `alt_text` / `caption` / `title`. |
-| `update_post` | Partially update an existing **draft** post. Any non-draft target (`publish` / `pending` / `private` / `trash`) is rejected to prevent accidental edits to published content. Unspecified fields are preserved. |
+| `update_post` | Partially update an existing **draft** post. Any non-draft target (`publish` / `pending` / `private` / `trash`) is rejected to prevent accidental edits to published content. Unspecified fields are preserved. Supports `category_names` like `create_draft_post`. |
 | `list_drafts` | List drafts owned by the authenticated user, ordered by last modified time, with `limit` and `offset` paging. |
 | `delete_draft_post` | Move a draft to the trash (default) or fully delete it with `force_delete: true`. Non-draft targets are rejected. |
 | `get_post` | Fetch a single post by ID with the **raw** Gutenberg content (not the rendered HTML), so Claude can reason about block markers and match the author's voice when composing new posts. Read-only, no status restriction. |
 | `list_posts` | Discover posts by status / search / date. Returns lightweight summaries without the body (use `get_post` for the full text) to keep LLM context small. |
+| `list_categories` | List categories with ID / name / slug / parent / count. Use before `create_draft_post` to see the existing classification (and to pick IDs for `categories`). Supports `parent=0` to list only root categories. |
+| `list_tags` | List tags with ID / name / slug / count. Use to check existing tags before adding new ones via `create_draft_post`, avoiding near-duplicates. |
 
 Design principles:
 
@@ -129,6 +131,7 @@ Restart Claude Code after editing — the MCP server list is read at startup.
 | `WP_API_URL` | ✅ | Site base URL, no trailing slash, **HTTPS only** (the server refuses to start otherwise). |
 | `WP_USERNAME` | ✅ | WordPress username of the dedicated MCP user. |
 | `WP_APP_PASSWORD` | ✅ | Application Password value (quote it in `.env` — it contains spaces). |
+| `WP_REQUEST_TIMEOUT_MS` | — | Per-request timeout in milliseconds. Integer in `[1000, 600000]`. Defaults to **60000** (60 s). Raise this if you upload large media over slow shared hosting. |
 
 ## Example: image + draft workflow
 
@@ -155,6 +158,24 @@ to match WordPress's default upload MIME allowlist.
 
 Both `update_post` and `delete_draft_post` refuse to operate on anything
 that is not currently a draft. Published posts remain off-limits by design.
+
+## Example: categorizing and tagging
+
+Categories and tags can both be given either by ID or by name:
+
+1. Call `list_categories` (optionally `list_tags`) to see what already exists.
+   Prefer reusing existing IDs / names over minting new ones.
+2. When calling `create_draft_post` or `update_post`:
+   - `categories: [6, 22]` — existing category IDs.
+   - `category_names: ["Windows", "AI"]` — names; missing ones are auto-created
+     at the root level (no `parent`).
+   - Both may be combined; the server unions them and removes duplicates.
+   - `tags: ["Claude", "MCP"]` — names; missing ones are auto-created.
+
+The server intentionally does **not** expose separate `create_category` /
+`create_tag` tools — auto-creation happens on demand as a side effect of
+posting. This keeps the classification from growing unchecked while still
+letting the LLM reuse or introduce terms naturally.
 
 ## Example: referencing past posts for voice / style
 

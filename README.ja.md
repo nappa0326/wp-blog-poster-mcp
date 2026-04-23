@@ -6,13 +6,15 @@ WordPress の REST API を叩いて下書き記事を作成・編集し、画像
 
 ## 提供ツール
 
-- `create_draft_post`: 下書き記事 1 件を作成する。常に `status: "draft"` 固定。アイキャッチ画像のメディア ID (`featured_media_id`) を指定可能。
+- `create_draft_post`: 下書き記事 1 件を作成する。常に `status: "draft"` 固定。アイキャッチ画像のメディア ID (`featured_media_id`) を指定可能。タグはタグ名、カテゴリは ID（`categories`）またはカテゴリ名（`category_names`）で指定でき、名前指定側は存在しなければ自動作成される（カテゴリは root 配下固定）。
 - `upload_media`: 画像（PNG/JPEG/GIF/WebP）をメディアライブラリにアップロードする。base64 で受け取り、`alt_text` / `caption` / `title` を設定できる。返り値に `<img>` 埋込のテンプレート文字列を含む。
-- `update_post`: 既存の **下書き** 投稿を部分更新する。対象が `draft` 以外（`publish` など）の場合はエラーで弾き、誤って公開済み記事を書き換えることを防ぐ。`title` / `content` / `excerpt` / `categories` / `tags` / `featured_media_id` のうち指定したフィールドのみ上書きされ、未指定は現在値を保持する。
+- `update_post`: 既存の **下書き** 投稿を部分更新する。対象が `draft` 以外（`publish` など）の場合はエラーで弾き、誤って公開済み記事を書き換えることを防ぐ。`title` / `content` / `excerpt` / `categories` / `category_names` / `tags` / `featured_media_id` のうち指定したフィールドのみ上書きされ、未指定は現在値を保持する。
 - `list_drafts`: 現在の認証ユーザーが所有する **下書き** 投稿の一覧を、更新日時の降順で返す（既定 20 件）。`update_post` / `delete_draft_post` で対象の投稿 ID を特定する用途を想定。
 - `delete_draft_post`: 下書き投稿を削除する。既定（`force_delete=false`）では **ゴミ箱送り**（`status=trash`）で管理画面から復元可能。`force_delete=true` で完全削除（復元不可）。対象が `draft` 以外の場合はエラーで弾く。
 - `get_post`: 投稿 ID を指定して 1 件取得する。本文は Gutenberg ブロックマーカー込みの **raw**（`context=edit`）を返すため、Claude が過去記事の文体・構造を参考にして新記事を書くのに適している。読み取り専用でステータス制限なし。
 - `list_posts`: 投稿の探索用一覧（既定は公開記事の新しい順）。本文は含まず ID / タイトル / 抜粋 / ステータス / 日付を返す軽量形式。気になる投稿の ID を `get_post` に渡す 2 段階フローを想定。
+- `list_categories`: カテゴリの一覧を返す（既定は使用数の多い順）。既存の分類体系を Claude が把握した上で `create_draft_post` / `update_post` の `categories` または `category_names` を指定するための参照用。`parent=0` で root のみ、`parent=<id>` で特定カテゴリの子のみに絞り込める。
+- `list_tags`: タグの一覧を返す（既定は使用数の多い順）。重複した意味のタグ作成を避けるため、投稿前に既存タグを Claude に把握させる用途を想定。
 
 ## 前提条件
 
@@ -103,6 +105,7 @@ Claude Code の MCP サーバー一覧は起動時に読まれるため、編集
 | `WP_API_URL` | ○ | サイトのベース URL（末尾スラッシュなし、HTTPS 必須） |
 | `WP_USERNAME` | ○ | WordPress ユーザー名 |
 | `WP_APP_PASSWORD` | ○ | Application Password（スペース込み） |
+| `WP_REQUEST_TIMEOUT_MS` | — | REST API 呼出のタイムアウト（ミリ秒、`1000`〜`600000` の整数）。既定 **60000**（60 秒）。共有ホスティングで大きな画像をアップロードする場合は引き上げる。 |
 
 ## 画像付き投稿のフロー例
 
@@ -125,6 +128,19 @@ PNG/JPEG/GIF/WebP 以外（SVG 等）は WP のデフォルト設定で拒否さ
    - 完全削除したい場合は `force_delete: true` を指定
 
 `update_post` / `delete_draft_post` は `status=draft` の投稿のみを対象にする。公開済み・予約投稿・ゴミ箱等の非 draft 投稿にはエラーで弾く仕組みで、誤って公開済み記事を変更・削除することを防ぐ。
+
+## カテゴリ・タグの指定フロー
+
+カテゴリもタグも、ID でも名前でも指定できる。
+
+1. 事前に `list_categories`（必要なら `list_tags`）を呼び、既存の分類体系を確認する。新規に作るより既存 ID / 名前を再利用するのが望ましい
+2. `create_draft_post` / `update_post` の引数:
+   - `categories: [6, 22]` — 既存カテゴリの ID を直接指定
+   - `category_names: ["Windows", "AI"]` — 名前で指定。存在しない場合は **root 配下に自動作成**（`parent` 指定は非対応）
+   - 両方併用可、サーバー側で union マージして重複排除する
+   - `tags: ["Claude", "MCP"]` — タグ名指定、存在しなければ自動作成
+
+`create_category` / `create_tag` のような単独ツールは **意図的に提供しない**。分類体系の肥大化を防ぐためで、名前指定時の自動作成は「投稿作業の副作用」として発生するのみに限定している。
 
 ## 過去記事の文体を参考にして新記事を書かせるフロー
 

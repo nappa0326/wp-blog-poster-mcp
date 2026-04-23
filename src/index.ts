@@ -14,6 +14,8 @@ import { registerListDraftsTool } from "./tools/list-drafts.js";
 import { registerDeletePostTool } from "./tools/delete-post.js";
 import { registerGetPostTool } from "./tools/get-post.js";
 import { registerListPostsTool } from "./tools/list-posts.js";
+import { registerListCategoriesTool } from "./tools/list-categories.js";
+import { registerListTagsTool } from "./tools/list-tags.js";
 
 async function main(): Promise<void> {
   const config = loadConfig();
@@ -21,7 +23,7 @@ async function main(): Promise<void> {
 
   const server = new McpServer({
     name: "wp-blog-poster",
-    version: "0.2.0",
+    version: "0.3.0",
   });
 
   registerCreatePostTool(server, wp);
@@ -31,6 +33,8 @@ async function main(): Promise<void> {
   registerDeletePostTool(server, wp);
   registerGetPostTool(server, wp);
   registerListPostsTool(server, wp);
+  registerListCategoriesTool(server, wp);
+  registerListTagsTool(server, wp);
 
   const transport = new StdioServerTransport();
   await server.connect(transport);

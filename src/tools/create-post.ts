@@ -33,6 +33,18 @@ const inputShape = {
     .max(20, "categories は 20 個まで")
     .optional()
     .describe("カテゴリ ID の配列（任意）"),
+  category_names: z
+    .array(
+      z
+        .string()
+        .min(1)
+        .max(50, "各カテゴリ名は 50 文字以内にしてください"),
+    )
+    .max(20, "category_names は 20 個まで")
+    .optional()
+    .describe(
+      "カテゴリ名の配列（任意、存在しなければ root 配下に新規作成される）。categories と併用可、union マージされる。",
+    ),
   tags: z
     .array(
       z
@@ -86,6 +98,7 @@ export function registerCreatePostTool(
           content: args.content,
           excerpt: args.excerpt,
           categories: args.categories,
+          categoryNames: args.category_names,
           tags: tagIds,
           featuredMedia: args.featured_media_id,
         });

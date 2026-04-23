@@ -38,6 +38,18 @@ const inputShape = {
     .max(20, "categories は 20 個まで")
     .optional()
     .describe("カテゴリ ID の配列（任意、指定時は現在値を上書き）"),
+  category_names: z
+    .array(
+      z
+        .string()
+        .min(1)
+        .max(50, "各カテゴリ名は 50 文字以内にしてください"),
+    )
+    .max(20, "category_names は 20 個まで")
+    .optional()
+    .describe(
+      "カテゴリ名の配列（任意、存在しなければ root 配下に新規作成される）。categories と併用可、union マージして現在値を上書き。",
+    ),
   tags: z
     .array(
       z
@@ -89,11 +101,12 @@ export function registerUpdatePostTool(
           args.content !== undefined ||
           args.excerpt !== undefined ||
           args.categories !== undefined ||
+          args.category_names !== undefined ||
           args.tags !== undefined ||
           args.featured_media_id !== undefined;
         if (!hasAnyField) {
           throw new Error(
-            "更新するフィールドが指定されていません。title/content/excerpt/categories/tags/featured_media_id のいずれかを指定してください。",
+            "更新するフィールドが指定されていません。title/content/excerpt/categories/category_names/tags/featured_media_id のいずれかを指定してください。",
           );
         }
 
@@ -109,6 +122,7 @@ export function registerUpdatePostTool(
           content: args.content,
           excerpt: args.excerpt,
           categories: args.categories,
+          categoryNames: args.category_names,
           tags: tagIds,
           featuredMedia: args.featured_media_id,
         });

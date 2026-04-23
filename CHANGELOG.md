@@ -5,6 +5,28 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] - 2026-04-23
+
+### Added
+- `list_categories` tool — list existing WordPress categories with ID / name /
+  slug / parent / count / description. Useful for Claude to inspect the
+  existing classification before adding categories to a post.
+- `list_tags` tool — list existing tags with usage count. Helps avoid creating
+  duplicate tags with similar meanings.
+- `create_draft_post` and `update_post` now accept `category_names: string[]`
+  in addition to `categories: number[]`. Names are resolved to IDs (and
+  created at the root level if they don't exist), then unioned with the ID
+  list. Same pattern as the existing `tags` auto-creation.
+- `WP_REQUEST_TIMEOUT_MS` environment variable — configurable REST request
+  timeout (range 1000–600000 ms). Default raised from the previous
+  hard-coded 30 000 ms to **60 000 ms** to better accommodate larger media
+  uploads over shared hosting.
+
+### Changed
+- Default REST request timeout is now 60 seconds (up from 30 seconds).
+  Existing deployments will continue to work without any configuration
+  change; set `WP_REQUEST_TIMEOUT_MS` to override.
+
 ## [0.2.0] - 2026-04-22
 
 ### Added

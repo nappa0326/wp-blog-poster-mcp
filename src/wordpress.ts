@@ -3,13 +3,12 @@
 
 import type { AppConfig } from "./config.js";
 
-const REQUEST_TIMEOUT_MS = 30_000;
-
 export interface CreateDraftPostParams {
   title: string;
   content: string;
   excerpt?: string;
   categories?: number[];
+  categoryNames?: string[]; // 名前指定、内部で resolveCategoryIds により ID 化 + 既存なし時は新規作成
   tags?: number[]; // ここでは解決済みの tag ID 配列を受け取る
   featuredMedia?: number; // アイキャッチ画像のメディア ID（任意）
 }
@@ -28,6 +27,7 @@ export interface UpdateDraftPostParams {
   content?: string;
   excerpt?: string;
   categories?: number[];
+  categoryNames?: string[]; // 名前指定、内部で resolveCategoryIds により ID 化 + 既存なし時は新規作成
   tags?: number[]; // 解決済みの tag ID 配列
   featuredMedia?: number; // アイキャッチ画像のメディア ID
 }
@@ -109,6 +109,40 @@ export interface UploadMediaParams {
   title?: string;
 }
 
+export interface ListCategoriesParams {
+  limit: number; // 1〜100
+  offset: number; // 0〜
+  orderBy: "count" | "name" | "id";
+  order: "asc" | "desc";
+  search?: string;
+  parent?: number; // 0 指定で root のみ、未指定で全階層
+}
+
+export interface CategorySummary {
+  id: number;
+  name: string;
+  slug: string;
+  parent: number;
+  count: number;
+  description: string;
+}
+
+export interface ListTagsParams {
+  limit: number; // 1〜100
+  offset: number; // 0〜
+  orderBy: "count" | "name" | "id";
+  order: "asc" | "desc";
+  search?: string;
+}
+
+export interface TagSummary {
+  id: number;
+  name: string;
+  slug: string;
+  count: number;
+  description: string;
+}
+
 export interface UploadedMedia {
   id: number;
   sourceUrl: string;
@@ -128,11 +162,13 @@ export interface UploadedMedia {
 export class WordPressClient {
   private readonly apiUrl: string;
   private readonly authHeader: string;
+  private readonly requestTimeoutMs: number;
 
   constructor(config: AppConfig) {
     this.apiUrl = config.apiUrl;
     const raw = `${config.username}:${config.appPassword}`;
     this.authHeader = `Basic ${Buffer.from(raw, "utf8").toString("base64")}`;
+    this.requestTimeoutMs = config.requestTimeoutMs;
   }
 
   /**
@@ -145,8 +181,13 @@ export class WordPressClient {
       status: "draft",
     };
     if (params.excerpt !== undefined) body.excerpt = params.excerpt;
-    if (params.categories && params.categories.length > 0) {
-      body.categories = params.categories;
+    // categories (ID 配列) と categoryNames (名前配列) をマージ、重複排除
+    const mergedCategories = await this.mergeCategoryIds(
+      params.categories,
+      params.categoryNames,
+    );
+    if (mergedCategories.length > 0) {
+      body.categories = mergedCategories;
     }
     if (params.tags && params.tags.length > 0) {
       body.tags = params.tags;
@@ -210,7 +251,15 @@ export class WordPressClient {
     if (params.title !== undefined) body.title = params.title;
     if (params.content !== undefined) body.content = params.content;
     if (params.excerpt !== undefined) body.excerpt = params.excerpt;
-    if (params.categories !== undefined) body.categories = params.categories;
+    // update では「categories / categoryNames のいずれか指定あり」の場合のみマージして送信。
+    // 両方未指定なら body.categories を送らず既存値を保持する。
+    if (params.categories !== undefined || params.categoryNames !== undefined) {
+      const mergedCategories = await this.mergeCategoryIds(
+        params.categories,
+        params.categoryNames,
+      );
+      body.categories = mergedCategories;
+    }
     if (params.tags !== undefined) body.tags = params.tags;
     if (params.featuredMedia !== undefined) {
       body.featured_media = params.featuredMedia;
@@ -595,6 +644,169 @@ export class WordPressClient {
     return id;
   }
 
+  /**
+   * カテゴリ名の配列を category ID の配列に解決する。
+   * 既存カテゴリがあればその ID を返し、無ければ root 配下に新規作成してその ID を返す。
+   * 階層指定 (parent) は v0.3.0 ではサポートしない（誤って深い階層を増やさないため）。
+   */
+  async resolveCategoryIds(categoryNames: string[]): Promise<number[]> {
+    const ids: number[] = [];
+    for (const name of categoryNames) {
+      const trimmed = name.trim();
+      if (!trimmed) continue;
+      const id = await this.findOrCreateCategory(trimmed);
+      ids.push(id);
+    }
+    return ids;
+  }
+
+  private async findOrCreateCategory(name: string): Promise<number> {
+    // search は partial match のため、name 完全一致で二重チェック
+    const search = encodeURIComponent(name);
+    const existing = await this.request<unknown[]>(
+      "GET",
+      `/wp/v2/categories?search=${search}&per_page=100`,
+    );
+    if (Array.isArray(existing)) {
+      for (const item of existing) {
+        if (
+          item &&
+          typeof item === "object" &&
+          "name" in item &&
+          "id" in item &&
+          (item as { name?: unknown }).name === name
+        ) {
+          return Number((item as { id: unknown }).id);
+        }
+      }
+    }
+    // 無ければ新規作成 (root 配下、parent 未指定)
+    const created = await this.request<Record<string, unknown>>(
+      "POST",
+      "/wp/v2/categories",
+      { name },
+    );
+    const id = Number(created.id);
+    if (!Number.isFinite(id) || id <= 0) {
+      throw new Error(
+        `カテゴリ作成 API が ID を返しませんでした: ${JSON.stringify(created)}`,
+      );
+    }
+    return id;
+  }
+
+  /**
+   * `categories` (ID 配列) と `categoryNames` (名前配列) を union マージして重複排除した ID 配列を返す。
+   * 両方未指定なら空配列を返す。
+   */
+  private async mergeCategoryIds(
+    categoryIds?: number[],
+    categoryNames?: string[],
+  ): Promise<number[]> {
+    const ids = new Set<number>();
+    if (categoryIds) {
+      for (const id of categoryIds) {
+        if (Number.isFinite(id) && id > 0) ids.add(id);
+      }
+    }
+    if (categoryNames && categoryNames.length > 0) {
+      const resolved = await this.resolveCategoryIds(categoryNames);
+      for (const id of resolved) ids.add(id);
+    }
+    return [...ids];
+  }
+
+  /**
+   * カテゴリ一覧を取得する（軽量フィールドのみ）。
+   *
+   * `_fields` で id/name/slug/parent/count/description に絞りコンテキスト削減。
+   * `parent` パラメータで 0 指定 = root のみ、未指定 = 全階層。
+   */
+  async listCategories(params: ListCategoriesParams): Promise<CategorySummary[]> {
+    const query = new URLSearchParams({
+      per_page: String(params.limit),
+      offset: String(params.offset),
+      orderby: params.orderBy,
+      order: params.order,
+      _fields: "id,name,slug,parent,count,description",
+    });
+    if (params.search !== undefined && params.search.length > 0) {
+      query.set("search", params.search);
+    }
+    if (params.parent !== undefined) {
+      query.set("parent", String(params.parent));
+    }
+
+    const list = await this.request<unknown[]>(
+      "GET",
+      `/wp/v2/categories?${query.toString()}`,
+    );
+    if (!Array.isArray(list)) {
+      throw new Error(
+        `REST API が配列を返しませんでした: ${JSON.stringify(list)}`,
+      );
+    }
+
+    const results: CategorySummary[] = [];
+    for (const item of list) {
+      if (!item || typeof item !== "object") continue;
+      const rec = item as Record<string, unknown>;
+      const id = Number(rec.id);
+      if (!Number.isFinite(id) || id <= 0) continue;
+      results.push({
+        id,
+        name: typeof rec.name === "string" ? rec.name : "",
+        slug: typeof rec.slug === "string" ? rec.slug : "",
+        parent: Number(rec.parent ?? 0) || 0,
+        count: Number(rec.count ?? 0) || 0,
+        description: typeof rec.description === "string" ? rec.description : "",
+      });
+    }
+    return results;
+  }
+
+  /**
+   * タグ一覧を取得する（軽量フィールドのみ）。
+   */
+  async listTags(params: ListTagsParams): Promise<TagSummary[]> {
+    const query = new URLSearchParams({
+      per_page: String(params.limit),
+      offset: String(params.offset),
+      orderby: params.orderBy,
+      order: params.order,
+      _fields: "id,name,slug,count,description",
+    });
+    if (params.search !== undefined && params.search.length > 0) {
+      query.set("search", params.search);
+    }
+
+    const list = await this.request<unknown[]>(
+      "GET",
+      `/wp/v2/tags?${query.toString()}`,
+    );
+    if (!Array.isArray(list)) {
+      throw new Error(
+        `REST API が配列を返しませんでした: ${JSON.stringify(list)}`,
+      );
+    }
+
+    const results: TagSummary[] = [];
+    for (const item of list) {
+      if (!item || typeof item !== "object") continue;
+      const rec = item as Record<string, unknown>;
+      const id = Number(rec.id);
+      if (!Number.isFinite(id) || id <= 0) continue;
+      results.push({
+        id,
+        name: typeof rec.name === "string" ? rec.name : "",
+        slug: typeof rec.slug === "string" ? rec.slug : "",
+        count: Number(rec.count ?? 0) || 0,
+        description: typeof rec.description === "string" ? rec.description : "",
+      });
+    }
+    return results;
+  }
+
   // --- 内部ヘルパー ---
 
   private buildUrl(route: string): string {
@@ -642,7 +854,7 @@ export class WordPressClient {
     ) as unknown as BodyInit;
 
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+    const timer = setTimeout(() => controller.abort(), this.requestTimeoutMs);
     try {
       const res = await fetch(url, {
         method,
@@ -671,7 +883,7 @@ export class WordPressClient {
     } catch (err) {
       if (err instanceof Error && err.name === "AbortError") {
         throw new Error(
-          `WordPress REST API がタイムアウトしました (${REQUEST_TIMEOUT_MS}ms): ${method} ${route}`,
+          `WordPress REST API がタイムアウトしました (${this.requestTimeoutMs}ms): ${method} ${route}`,
         );
       }
       throw err;
@@ -697,7 +909,7 @@ export class WordPressClient {
     }
 
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+    const timer = setTimeout(() => controller.abort(), this.requestTimeoutMs);
     try {
       const res = await fetch(url, {
         method,
@@ -727,7 +939,7 @@ export class WordPressClient {
     } catch (err) {
       if (err instanceof Error && err.name === "AbortError") {
         throw new Error(
-          `WordPress REST API がタイムアウトしました (${REQUEST_TIMEOUT_MS}ms): ${method} ${route}`,
+          `WordPress REST API がタイムアウトしました (${this.requestTimeoutMs}ms): ${method} ${route}`,
         );
       }
       throw err;

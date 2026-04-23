@@ -1,6 +1,6 @@
 {
   "name": "wp-blog-poster-mcp",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Minimal local MCP server for creating and managing WordPress drafts over REST API (STDIO, Basic auth).",
   "license": "MIT",
   "author": {
